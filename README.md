@@ -41,19 +41,15 @@ make            # 或 Windows: build.bat
 ./raytracer_demo --width 512 --spheres 64 --depth 4   # 轻量预览
 ```
 
-## 共同的教学范式
-
-1. **CPU 基线** → 让学生感受「不并行有多慢」
-2. **GPU 朴素并行** → 展示「并行本身」的暴力加速（千倍级）
-3. **数据流/访存优化** → 在并行之上再榨带宽、削延迟
-4. **算法级/硬件级终极优化** → 负载特征决定方向
-5. **加速比报告** → 自动生成 Markdown，可直接发给学生
-
 ## 验证环境
 
 - GPU: NVIDIA RTX 3080 Laptop (Ampere, CC 8.6, 16GB)
 - CUDA 13.0, MSVC 14.44, Windows SDK 10.0.26100.0
 - 编译: `-arch=sm_86 -Xcompiler "/utf-8" -Xcompiler "/openmp"`
+
+## 参考链接
+
+- [tinyraytracer: understandable raytracing](https://github.com/ssloy/tinyraytracer/wiki/Part-1:-understandable-raytracing) — gpu-raytracer-demo 算法参考的入门光线追踪教程（Phong 光照、反射/折射、逐像素求交），原项目为纯 CPU 版，本 demo 将其 CUDA 化并加入多层 GPU 优化与 BVH 加速结构。
 
 ## License
 
