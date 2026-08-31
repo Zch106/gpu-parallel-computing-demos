@@ -55,7 +55,8 @@ gpu-attention-demo/
 │   ├── gemm_tc.cu         # L5（WMMA FP16→FP32）
 │   ├── cublas_ref.cu      # ★ cuBLAS FP32 / FP16 对照
 │   └── report.cu          # 生成 results.md
-└── results.md             # 运行自动生成
+├── results.md             # 运行自动生成（会被覆盖）
+└── PERFORMANCE.md         # 人工整理的性能分析报告（含逐层收益原理）
 ```
 
 ## 构建与运行
@@ -71,6 +72,10 @@ make                # 编译（-arch=sm_86，链接 -lcublas 仅用于对照）
 运行后：
 - 终端实时打印每个规模的六行（L1–L5 + cuBLAS）耗时 / 加速比 / 最大误差 / 正确性；
 - 同时生成 `results.md`（含汇总表 + 各层要点与解读），可直接发给学生。
+
+> 想了解「每一层为什么能变快」，请看 [PERFORMANCE.md](PERFORMANCE.md)：汇总三档规模的实测数据，
+> 逐层解释收益来源（并行度 / 算术强度 / 向量化与 bank conflict / Tensor Core），并附与 cuBLAS 的对照。
+> 注意 `results.md` 每次运行都会被覆盖，`PERFORMANCE.md` 是手写的分析报告。
 
 ## 计时与校验说明
 

@@ -118,13 +118,62 @@ __global__ void rt_const_kernel(vec3* fb, int W, int H, float fov, int max_depth
     fb[pix] = trace_const(vec3(0, 0, 0), dir, max_depth);
 }
 
+// 退回路径：球数/光源数超出常量内存容量时改用全局内存 + GlobalInter。
+// 数值结果与 L3 完全一致，保证 L4 在任何球数下都能正确运行而非报错中止。
+__global__ void rt_const_fallback_kernel(const Sphere* sph, int nsph,
+                                         const Light* lgt, int nlight,
+                                         vec3* fb, int W, int H, float fov, int max_depth) {
+    int pix = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = W * H;
+    if (pix >= total) return;
+    int i = pix % W, j = pix / W;
+    float dx = (i + 0.5f) - W / 2.f;
+    float dy = -(j + 0.5f) + H / 2.f;
+    float dz = -H / (2.f * tanf(fov / 2.f));
+    vec3 dir = vec3(dx, dy, dz).normalized();
+    GlobalInter inter{sph, nsph, lgt, nlight};
+    fb[pix] = trace_ray(vec3(0, 0, 0), dir, max_depth, inter);
+}
+
 void rt_gpu_constant(const Scene& s, vec3* fb, int max_depth,
                     float& kernel_ms, float& e2e_ms) {
-    if (s.nsph > MAX_CONST_SPH || s.nlight > MAX_CONST_LGT) {
-        fprintf(stderr, "[WARN] 场景球数(%d)超过常量内存上限(%d)，L4 改用全局内存退回朴素版行为。\n",
-                s.nsph, MAX_CONST_SPH);
-    }
     int W = s.cam.width, H = s.cam.height, total = W * H;
+    int threads = 256;
+    int blocks = (total + threads - 1) / threads;
+
+    // 超出常量内存容量：退回全局内存（朴素）路径，结果仍正确
+    if (s.nsph > MAX_CONST_SPH || s.nlight > MAX_CONST_LGT) {
+        fprintf(stderr, "[WARN] 场景规模(球=%d/光源=%d)超过常量内存上限(球=%d/光源=%d)，L4 已退回全局内存朴素路径(数值结果同 L3)\n",
+                s.nsph, s.nlight, MAX_CONST_SPH, MAX_CONST_LGT);
+
+        Sphere* d_sph = nullptr;
+        Light* d_lgt = nullptr;
+        CHECK(cudaMalloc(&d_sph, s.nsph * sizeof(Sphere)));
+        CHECK(cudaMemcpy(d_sph, s.spheres, s.nsph * sizeof(Sphere), cudaMemcpyHostToDevice));
+        CHECK(cudaMalloc(&d_lgt, s.nlight * sizeof(Light)));
+        CHECK(cudaMemcpy(d_lgt, s.lights, s.nlight * sizeof(Light), cudaMemcpyHostToDevice));
+        vec3* d_fb = (vec3*)dev_alloc(total * sizeof(vec3));
+
+        rt_const_fallback_kernel<<<blocks, threads>>>(d_sph, s.nsph, d_lgt, s.nlight,
+                                                     d_fb, W, H, s.cam.fov, max_depth);
+        CHECK(cudaDeviceSynchronize());
+
+        auto t0 = std::chrono::high_resolution_clock::now();
+        CudaTimer timer;
+        timer.begin();
+        rt_const_fallback_kernel<<<blocks, threads>>>(d_sph, s.nsph, d_lgt, s.nlight,
+                                                     d_fb, W, H, s.cam.fov, max_depth);
+        timer.end();
+        auto t1 = std::chrono::high_resolution_clock::now();
+
+        kernel_ms = timer.ms();
+        e2e_ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
+        CHECK(cudaMemcpy(fb, d_fb, total * sizeof(vec3), cudaMemcpyDeviceToHost));
+        CHECK(cudaFree(d_fb));
+        CHECK(cudaFree(d_sph));
+        CHECK(cudaFree(d_lgt));
+        return;
+    }
 
     CHECK(cudaMemcpyToSymbol(c_sph, s.spheres, s.nsph * sizeof(Sphere)));
     CHECK(cudaMemcpyToSymbol(c_lgt, s.lights, s.nlight * sizeof(Light)));
@@ -132,8 +181,6 @@ void rt_gpu_constant(const Scene& s, vec3* fb, int max_depth,
     CHECK(cudaMemcpyToSymbol(c_nlight, &s.nlight, sizeof(int)));
 
     vec3* d_fb = (vec3*)dev_alloc(total * sizeof(vec3));
-    int threads = 256;
-    int blocks = (total + threads - 1) / threads;
 
     rt_const_kernel<<<blocks, threads>>>(d_fb, W, H, s.cam.fov, max_depth);
     CHECK(cudaDeviceSynchronize());
